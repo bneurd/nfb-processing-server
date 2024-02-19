@@ -9,7 +9,7 @@ from os import get_terminal_size
 from time import sleep
 from copy import deepcopy
 from sklearn.preprocessing import minmax_scale
-from pylsl import StreamInfo, StreamOutlet, local_clock
+from pylsl import StreamInfo, StreamOutlet
 
 #debug
 # import matplotlib.pyplot as plt
