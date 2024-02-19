@@ -9,6 +9,7 @@ from os import get_terminal_size
 from time import sleep
 from copy import deepcopy
 from sklearn.preprocessing import minmax_scale
+from pylsl import StreamInfo, StreamOutlet, local_clock
 
 #debug
 # import matplotlib.pyplot as plt
@@ -51,9 +52,11 @@ class Eletroencefalograma:
     #end configure
 
 
-    def execute(self, output, bufferSize, refresh, scale=0, simulate=False, start=0, finish=0):
+    def execute(self, output, bufferSize, refresh, scale=0, start=0, finish=0, simulate=False, stream=False):
         seconds = start
         breakPoint = (finish*self.freq) if finish>=(start+bufferSize) else self.data.shape[1]
+        info = StreamInfo('Processed Data', 'Markers', 1, 0, 'float32', 'myuidw43536')
+        outlet = StreamOutlet(info)
 
         with open(output + '.csv', mode='w') as file:
             writer = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
@@ -90,7 +93,12 @@ class Eletroencefalograma:
                     self.__consolePlot(bufferSize, seconds, features)
                     sleep(refresh)
                 
+                # Stream data to the network
+                if stream:
+                    outlet.push_sample([int(features[2])])
+                
                 seconds += refresh
+                
             #end while
         #end csv
     #end execute
@@ -205,4 +213,4 @@ if __name__ == "__main__":
     eeg = Eletroencefalograma('teste.txt', 256, 8)
     eeg.configure(electrodes=[1,2,3,4,5], notch=60, lowcut=5, highcut=35)
     # eeg.matplotGraphs()
-    eeg.execute(output="teste", bufferSize=5, refresh=1, scale=100, start=30, finish=50, simulate=True)
+    eeg.execute(output="teste", bufferSize=5, refresh=1, scale=100, start=30, finish=50, simulate=True, stream=True)
