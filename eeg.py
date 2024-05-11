@@ -24,7 +24,7 @@ class Eletroencefalograma:
         
 
     def processSample(self, electrodes=[], sample=None, notch=0, lowcut=0, highcut=0):
-        data = deepcopy(np.array(sample))
+        data = np.array(sample)
 
         #dominio do tempo
         data = data.swapaxes(1, 0)
@@ -34,20 +34,24 @@ class Eletroencefalograma:
             delete = [i for i in range(self.electrodes) if i not in electrodes]
             data = np.delete(data, delete, 0)
 
+        
+        # Aplica esses filtros lá no buffer size processing
+        
         #filtros
-        if notch:
-            # aplica o filtro notch no valor determinado e nos harmonicos
-            while notch <= (self.freq/2):
-                data = self.__butterNotch(data, notch)
-                notch = notch*2
+     
+        # if notch:
+        #     # aplica o filtro notch no valor determinado e nos harmonicos
+        #     while notch <= (self.freq/2):
+        #         data = self.__butterNotch(data, notch)
+        #         notch = notch*2
 
-        if lowcut:
-            #Remove o que estiver abaixo de Lowcut
-            data = self.__butterHighpass(data, lowcut)
+        # if lowcut:
+        #     #Remove o que estiver abaixo de Lowcut
+        #     data = self.__butterHighpass(data, lowcut)
 
-        if highcut:
-            #Remove o que estiver acima de Highcut
-            data = self.__butterLowpass(data, highcut)
+        # if highcut:
+        #     #Remove o que estiver acima de Highcut
+        #     data = self.__butterLowpass(data, highcut)
         if(self.data is None):
             self.data = data
         else:
@@ -67,32 +71,33 @@ class Eletroencefalograma:
 
         print("EEG Stream Found...")
         inlet.pull_sample()
-        # After waiting for a 5 seconds initial buffer, pull the chunk from the LSL stream
-        sleep(5)
+        # After waiting for a 4 seconds initial buffer, pull the chunk from the LSL stream
+        sleep(4.2)
         chunk = inlet.pull_chunk()
         eeg.processSample(electrodes=[1,2,3,4,5,6,7,8], sample=list(chunk[0]), notch=60, lowcut=5, highcut=35)
+
+        print(chunk[0].__len__())
 
         with open(output + '.csv', mode='w') as file:
             writer = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             writer.writerow(['Janela', 'Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'])
-
             while True:
                 #janela/buffer
                 # if seconds < (start+bufferSize):
                 if seconds < bufferSize:
                     continue
-                
-                
-                end = int(seconds * self.freq)
-                begin = int((seconds-bufferSize) * self.freq)
+                # 1-2-3s x 256Hz + 4s x 256Hz (bufferSize)
+                end = int((seconds * self.freq) + (bufferSize * self.freq))
+                # 1-2-3s x 256Hz
+                begin = int(seconds * self.freq)
+                sleep(refresh)
 
-                sample = inlet.pull_sample()
-                eeg.processSample(electrodes=[1,2,3,4,5,6,7,8], sample=[sample[0]], notch=0, lowcut=0, highcut=0)
+                chunk = inlet.pull_chunk()
+                eeg.processSample(electrodes=[1,2,3,4,5,6,7,8], sample=chunk[0], notch=0, lowcut=0, highcut=0)
                 
-                print(begin, end)
+                print(chunk[0].__len__())
                 #welch
                 f, psdWelch = signal.welch(self.data[:,begin:end])
-                print(f)
                 psdWelch = np.average(psdWelch, axis=0)
                 features = list()
                 for mi, ma in [(0, 4),(4, 8),(8, 12),(12, 30),(30, 100)]:
@@ -108,11 +113,11 @@ class Eletroencefalograma:
                 # plot
                 if simulate:
                     self.__consolePlot(bufferSize, seconds, features)
-                    sleep(refresh)
                 
                 # Stream data to the network
                 if stream:
-                    outlet.push_sample([int(features[2])])
+                    print(features)
+                    # outlet.push_sample([int(features)])
                 
                 seconds += refresh
                 
@@ -155,7 +160,7 @@ class Eletroencefalograma:
         for i in range(terminal.lines):
             clear = '\x1b[F' + (' ' * terminal.columns) + '\x1b[A'
             print(clear)
-        print(f'Arquivo: {self.filename}')
+        # print(f'Arquivo: {self.filename}')
         print(f'Simulação / Buffer {bufferSize}s / Segundo {second:.2f} ({m}:{s}):')
         print(f'  DELTA:\t{delta}\n  THETA:\t{theta}\n  ALPHA:\t{alpha}\n  BETA: \t{beta}\n  GAMMA:\t{gamma}')
     #end consoleplot
@@ -230,6 +235,9 @@ if __name__ == "__main__":
     eeg = Eletroencefalograma(256, 8)
 
     # After the initial buffer, start a ThreadPoolExecutor to process them and re-stream to the network
-    eeg.execute(output="teste", bufferSize=5, refresh=1, scale=100, start=0, simulate=True, stream=True)
+
+    # Scale is height of screen minus object height
+
+    eeg.execute(output="teste", bufferSize=4, refresh=1, scale=1030, start=6, simulate=False, stream=True)
     # eeg.matplotGraphs()
 
