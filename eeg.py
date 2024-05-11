@@ -9,54 +9,68 @@ from os import get_terminal_size
 from time import sleep
 from copy import deepcopy
 from sklearn.preprocessing import minmax_scale
-from pylsl import StreamInfo, StreamOutlet
+from pylsl import StreamInfo, StreamOutlet, resolve_stream, StreamInlet
+from concurrent.futures import ThreadPoolExecutor
 
 #debug
 # import matplotlib.pyplot as plt
 
 class Eletroencefalograma:
-    def __init__(self, filename, freq, electrodes):
-        self.filename = filename
+    def __init__(self, freq, electrodes):
         self.electrodes = electrodes
         self.freq = freq
-        self.rawData = self.__open(filename)
         self.data = None
     #end init/open
         
 
-    def configure(self, electrodes=[], notch=0, lowcut=0, highcut=0):
-        self.data = deepcopy(self.rawData)
+    def processSample(self, electrodes=[], sample=None, notch=0, lowcut=0, highcut=0):
+        data = deepcopy(np.array(sample))
 
         #dominio do tempo
-        self.data = self.data.swapaxes(1, 0)
+        data = data.swapaxes(1, 0)
 
         #remove colunas que nao serao usadas
         if electrodes:
             delete = [i for i in range(self.electrodes) if i not in electrodes]
-            self.data = np.delete(self.data, delete, 0)
+            data = np.delete(data, delete, 0)
 
         #filtros
         if notch:
             # aplica o filtro notch no valor determinado e nos harmonicos
             while notch <= (self.freq/2):
-                self.data = self.__butterNotch(self.data, notch)
+                data = self.__butterNotch(data, notch)
                 notch = notch*2
 
         if lowcut:
             #Remove o que estiver abaixo de Lowcut
-            self.data = self.__butterHighpass(self.data, lowcut)
+            data = self.__butterHighpass(data, lowcut)
 
         if highcut:
             #Remove o que estiver acima de Highcut
-            self.data = self.__butterLowpass(self.data, highcut)
+            data = self.__butterLowpass(data, highcut)
+        if(self.data is None):
+            self.data = data
+        else:
+            self.data = np.concatenate((self.data, data), axis=1)
     #end configure
 
 
-    def execute(self, output, bufferSize, refresh, scale=0, start=0, finish=0, simulate=False, stream=False):
+    def execute(self, output, bufferSize, refresh, scale=0, start=0, simulate=False, stream=False):
         seconds = start
-        breakPoint = (finish*self.freq) if finish>=(start+bufferSize) else self.data.shape[1]
+
         info = StreamInfo('Processed Data', 'Markers', 1, 0, 'float32', 'myuidw43536')
         outlet = StreamOutlet(info)
+
+        print("looking for a OpenBCI EEG stream...")
+        streams = resolve_stream('type', 'EEG')
+        inlet = StreamInlet(streams[0])
+
+        print("EEG Stream Found...")
+        inlet.pull_sample()
+        # After waiting for a 5 seconds initial buffer, pull the chunk from the LSL stream
+        sleep(5)
+        chunk = inlet.pull_chunk()
+        eeg.processSample(electrodes=[1,2,3,4,5,6,7,8], sample=list(chunk[0]), notch=60, lowcut=5, highcut=35)
 
         with open(output + '.csv', mode='w') as file:
             writer = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
@@ -68,14 +82,17 @@ class Eletroencefalograma:
                 if seconds < bufferSize:
                     continue
                 
+                
                 end = int(seconds * self.freq)
                 begin = int((seconds-bufferSize) * self.freq)
 
-                if end > breakPoint:
-                    break
+                sample = inlet.pull_sample()
+                eeg.processSample(electrodes=[1,2,3,4,5,6,7,8], sample=[sample[0]], notch=0, lowcut=0, highcut=0)
                 
+                print(begin, end)
                 #welch
                 f, psdWelch = signal.welch(self.data[:,begin:end])
+                print(f)
                 psdWelch = np.average(psdWelch, axis=0)
                 features = list()
                 for mi, ma in [(0, 4),(4, 8),(8, 12),(12, 30),(30, 100)]:
@@ -210,7 +227,9 @@ class Eletroencefalograma:
 # =========================================================
 
 if __name__ == "__main__":
-    eeg = Eletroencefalograma('teste.txt', 256, 8)
-    eeg.configure(electrodes=[1,2,3,4,5], notch=60, lowcut=5, highcut=35)
+    eeg = Eletroencefalograma(256, 8)
+
+    # After the initial buffer, start a ThreadPoolExecutor to process them and re-stream to the network
+    eeg.execute(output="teste", bufferSize=5, refresh=1, scale=100, start=0, simulate=True, stream=True)
     # eeg.matplotGraphs()
-    eeg.execute(output="teste", bufferSize=5, refresh=1, scale=100, start=30, finish=50, simulate=True, stream=True)
+
