@@ -76,16 +76,18 @@ class Eletroencefalograma:
         chunk = inlet.pull_chunk()
         eeg.processSample(electrodes=[1,2,3,4,5,6,7,8], sample=list(chunk[0]), notch=60, lowcut=5, highcut=35)
 
-        print(chunk[0].__len__())
-
         with open(output + '.csv', mode='w') as file:
+            print('open')
             writer = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             writer.writerow(['Janela', 'Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'])
             while True:
                 #janela/buffer
                 # if seconds < (start+bufferSize):
-                if seconds < bufferSize:
-                    continue
+                # Skip the loop iteration if seconds is less than the buffer size
+                # This is done to ensure that the processing is done only after the buffer size is reached
+                # if seconds < bufferSize:
+                #     continue
+
                 # 1-2-3s x 256Hz + 4s x 256Hz (bufferSize)
                 end = int((seconds * self.freq) + (bufferSize * self.freq))
                 # 1-2-3s x 256Hz
@@ -95,7 +97,6 @@ class Eletroencefalograma:
                 chunk = inlet.pull_chunk()
                 eeg.processSample(electrodes=[1,2,3,4,5,6,7,8], sample=chunk[0], notch=0, lowcut=0, highcut=0)
                 
-                print(chunk[0].__len__())
                 #welch
                 f, psdWelch = signal.welch(self.data[:,begin:end])
                 psdWelch = np.average(psdWelch, axis=0)
@@ -103,21 +104,20 @@ class Eletroencefalograma:
                 for mi, ma in [(0, 4),(4, 8),(8, 12),(12, 30),(30, 100)]:
                     features.append(psdWelch[mi:ma])
                 features = [np.average(f) for f in features]
-
-                if scale:
-                    features = minmax_scale(features, feature_range=(0, scale))
-
+                
                 #escreve no csv
                 writer.writerow(np.insert(features, 0, seconds))
 
                 # plot
                 if simulate:
-                    self.__consolePlot(bufferSize, seconds, features)
+                    self.__consolePlot(bufferSize, seconds, minmax_scale(features, feature_range=(0, 100)))
+
+                if scale:
+                    features = minmax_scale(features, feature_range=(0, scale))
                 
                 # Stream data to the network
                 if stream:
-                    print(features)
-                    # outlet.push_sample([int(features)])
+                    outlet.push_sample([int(features[3])])
                 
                 seconds += refresh
                 
@@ -234,10 +234,8 @@ class Eletroencefalograma:
 if __name__ == "__main__":
     eeg = Eletroencefalograma(256, 8)
 
-    # After the initial buffer, start a ThreadPoolExecutor to process them and re-stream to the network
-
     # Scale is height of screen minus object height
 
-    eeg.execute(output="teste", bufferSize=4, refresh=1, scale=1030, start=6, simulate=False, stream=True)
+    eeg.execute(output="teste", bufferSize=4, refresh=0.3, scale=1030, start=0, simulate=True, stream=True)
     # eeg.matplotGraphs()
 
