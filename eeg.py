@@ -59,7 +59,7 @@ class Eletroencefalograma:
     #end configure
 
 
-    def execute(self, output, bufferSize, refresh, scale=0, start=0, simulate=False, stream=False):
+    def execute(self, output, bufferSize, refresh, scale=0, start=0, simulate=False, stream=False, invertScale=False):
         seconds = start
 
         info = StreamInfo('Processed Data', 'Markers', 1, 0, 'float32', 'myuidw43536')
@@ -70,24 +70,19 @@ class Eletroencefalograma:
         inlet = StreamInlet(streams[0])
 
         print("EEG Stream Found...")
-        inlet.pull_sample()
-        # After waiting for a 4 seconds initial buffer, pull the chunk from the LSL stream
-        sleep(4.2)
-        chunk = inlet.pull_chunk()
-        eeg.processSample(electrodes=[1,2,3,4,5,6,7,8], sample=list(chunk[0]), notch=60, lowcut=5, highcut=35)
+        initSample = inlet.pull_sample()
 
+        # After waiting for the buffer size it pulls a chunk of data
+        # This should return the bufferSize * freq, in this case, 4 x 256 = 1024.
+        # But it doesn't always happen, sometimes it returns less data.
+        sleep(bufferSize)
+        chunk = inlet.pull_chunk()
+        eeg.processSample(electrodes=[1,2,3,4,5,6,7,8], sample=list(chunk[0]) + list([initSample[0]]), notch=60, lowcut=5, highcut=35)
         with open(output + '.csv', mode='w') as file:
             print('open')
             writer = csv.writer(file, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
             writer.writerow(['Janela', 'Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'])
             while True:
-                #janela/buffer
-                # if seconds < (start+bufferSize):
-                # Skip the loop iteration if seconds is less than the buffer size
-                # This is done to ensure that the processing is done only after the buffer size is reached
-                # if seconds < bufferSize:
-                #     continue
-
                 # 1-2-3s x 256Hz + 4s x 256Hz (bufferSize)
                 end = int((seconds * self.freq) + (bufferSize * self.freq))
                 # 1-2-3s x 256Hz
@@ -96,7 +91,14 @@ class Eletroencefalograma:
 
                 chunk = inlet.pull_chunk()
                 eeg.processSample(electrodes=[1,2,3,4,5,6,7,8], sample=chunk[0], notch=0, lowcut=0, highcut=0)
-                
+
+                # This ensures there always are enough data in the buffer, if not, wait for the refresh time and try again
+                # It makes sure the program won't crash due to data stream inconsistencies.
+                # The drawback is that it could affect response time of the game as it's basically just waiting for new data to come in
+                # Without adding the "seconds" variable. After there are enough data the loop comes back from where it stopped (seconds + refresh)
+                if(self.data.shape[1] < end):
+                    continue
+
                 #welch
                 f, psdWelch = signal.welch(self.data[:,begin:end])
                 psdWelch = np.average(psdWelch, axis=0)
@@ -104,20 +106,23 @@ class Eletroencefalograma:
                 for mi, ma in [(0, 4),(4, 8),(8, 12),(12, 30),(30, 100)]:
                     features.append(psdWelch[mi:ma])
                 features = [np.average(f) for f in features]
-                
-                #escreve no csv
-                writer.writerow(np.insert(features, 0, seconds))
 
                 # plot
                 if simulate:
                     self.__consolePlot(bufferSize, seconds, minmax_scale(features, feature_range=(0, 100)))
 
                 if scale:
-                    features = minmax_scale(features, feature_range=(0, scale))
-                
+                    if(invertScale):
+                        features = scale - minmax_scale(features, feature_range=(0, scale))
+                    else:
+                        features = minmax_scale(features, feature_range=(0, scale))
+
                 # Stream data to the network
                 if stream:
                     outlet.push_sample([int(features[3])])
+
+                #escreve no csv
+                writer.writerow(np.insert(features, 0, seconds))
                 
                 seconds += refresh
                 
@@ -236,6 +241,6 @@ if __name__ == "__main__":
 
     # Scale is height of screen minus object height
 
-    eeg.execute(output="teste", bufferSize=4, refresh=0.3, scale=1030, start=0, simulate=True, stream=True)
+    eeg.execute(output="teste", bufferSize=4, refresh=0.3, scale=1030, start=0, simulate=True, stream=True, invertScale=True)
     # eeg.matplotGraphs()
 
